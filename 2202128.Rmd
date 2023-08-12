@@ -1,0 +1,251 @@
+---
+title: "Data Analysis To Identify Racial Disparity In Policing"
+author: 'SchoolID: 2202128'
+---
+
+## Aim
+<style>
+body {
+text-align: justify}
+</style>
+This report aims to narrate the shortcomings of the dallas police force for the year 2016.
+
+
+For this project, we used the kaggle dataset on police incidents in Dallas in 2016.[ref][1]
+
+```{r include= FALSE,echo=FALSE}
+### import libraries to be used
+
+# load libraries
+
+lapply(c("olsrr","leaps","dplyr","ggplot2","faraway",
+        "caTools","car","quantmod","MASS","tidyr","xtable","corrplot","mice","readr","caret"), require, character.only = TRUE)
+library(lubridate)
+library(sf)
+library(leaflet)
+```
+
+```{r include= FALSE}
+### Import and clean dataset
+# read in data
+getwd()
+data = read.csv('37-00049_UOF-P_2016_prepped.csv')
+head(data)
+#clean data 
+#delete the first row, its not as descriptive. 
+data = data[-1,]
+#confirm changes
+head(data)
+
+#glimpse(data)
+
+#append incident date and time as the date column, and delete the time columns
+data$INCIDENT_DATE <- with(data, paste0(INCIDENT_DATE," ",INCIDENT_TIME))
+data = subset(data, select = -c(INCIDENT_TIME) )
+#we see that the data is all character, lets resolve this.
+#convert all data to its right datatype USING convert function automatically
+data <- type.convert(data, as.is = TRUE)  
+#Convert date columns to date datatype
+data$INCIDENT_DATE <- mdy_hms(data$INCIDENT_DATE)
+which(is.na(data$LOCATION_LATITUDE))
+#convert all data to its right datatype
+#data$UOF_NUMBER <- as.numeric(data$UOF_NUMBER)
+data$OFFICER_HIRE_DATE <- mdy(data$OFFICER_HIRE_DATE)
+
+#Add month to dataframe
+data$Incident_Month <-floor_date(data$INCIDENT_DATE, "month")
+ 
+data$Incident_Month <- as.Date(data$Incident_Month)
+```
+
+## Introduction
+<style>
+body {
+text-align: justify}
+</style>
+We will use visualization to highlight a lot of problem areas currently facing the dallas police force, especially when dealing with incidents. This report aims to convice the dallas government to make changes to combat the highlighted issues.
+
+
+
+**Part 1**
+
+```{r, echo=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+#Number of years on force histogram
+hist(data$OFFICER_YEARS_ON_FORCE, main="Statistics on officers years of experience",
+     breaks = 8,ylim = c(0,2000),ylab ="Number of officers",
+     xlab = "Years of experience",labels = T)
+```
+
+The histogram above shows that an astonishingly low amount of officers with more than 10 years of experience were responders to an incident. This is a problem as less experienced officers are likely to use excessive force when dealing with an incident.
+
+**Part 2**
+
+```{r, echo=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+#using scatter plot to show the correlation
+#create column that results to 1 if subject was injured during incident
+data$num_subject_injury <- ifelse(data$SUBJECT_INJURY=="Yes",1,0)
+yearsOnForce_ToIncidents<- data %>%
+  group_by(OFFICER_YEARS_ON_FORCE) %>%
+  filter(num_subject_injury == 1) %>%
+  summarize(total_incidents = n())
+
+ggplot(data = yearsOnForce_ToIncidents, aes(x = OFFICER_YEARS_ON_FORCE, y = total_incidents)) + 
+  geom_point() + 
+  labs(x = "Officer Years of Experience", y =" Number of Incidents with subject injury", title = "Plot of Years of Experience vs number of subject injury incidents")
+
+```
+
+The scatter plot above shows just how much likely an officer with less than 10 years of experience,  is likely to respond to an incident with the subject being injured. This justifies my point that less experienced officers are likely to use excessive force during a response to an incident. 
+
+**Part 3**
+
+```{r, echo=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+#table function 
+table(data$REASON_FOR_FORCE)
+```
+
+The table above shows that the leading reason by a large margin for using force during an incident was to arrest the subject. 
+
+**Part 4**
+
+```{r, echo=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+
+#get data on female hires
+data$num_hires <- ifelse(data$OFFICER_GENDER=="Female",1,0)
+#Number of female hires grouped my month
+incidents_hire_monthly <- data %>%
+  group_by(Incident_Month) %>%
+  summarize(total_hire = sum(num_hires))
+
+ggplot(data = incidents_hire_monthly, aes(x = Incident_Month, y = total_hire)) + 
+  geom_bar(stat = "identity", fill = "red") + 
+  labs(x = "Month", y = "Number of female hires", title = "Number of female hires per month")+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+ scale_x_date(date_breaks = "1 month", date_labels = "%b")
+```
+
+The bar plot above shows the statistic on the amount of female hires per month. The highest number of female hires was in April, while the lowest amount was in August. Overall, We see a steady decline in the amount of female hires per month, this is one shortcoming that the dallas police should overcome. In addition to hiring experienced officers, the police force should make an effort to hire more female officers. 
+
+```{r}
+```
+**Part 5**
+
+```{r, echo=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+#get number of incidents per month
+
+#group data by month and year, then calculate sum of incidents per month
+incidents_monthly <- data %>%
+  group_by(Incident_Month) %>%
+  summarize(total_incidents = n())
+
+
+ggplot(data = incidents_monthly, aes(x = Incident_Month, y = total_incidents)) +
+  geom_line(size = 2, color="red") +
+  labs(title = "Number of Incidents per Month",
+       x = "Month",
+       y = "Total Incidents",
+       size = 15) + scale_x_date(date_breaks = "1 month", date_labels = "%b")
+
+```
+
+The time series plot above illustrates that during 2016, the police force recorded its highest number of incidents in March, our next plot will show a clearer trend with outliers taken into account
+
+**Part 6**
+
+```{r, echo=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+#illustrate the data with a smooth line
+# Create a scatter plot with a smooth line
+
+ggplot(data = incidents_monthly, aes(x = Incident_Month, y = total_incidents)) +
+  geom_point() +
+  geom_smooth(method = "loess", se = FALSE) +
+  labs(title = "Number of incidents per month (reduced noise)", x = "Month", y = "Total Incidents")+ scale_x_date(date_breaks = "1 month", date_labels = "%b")
+```
+
+With smoothing applied to our time series plot, we see that actually the period between late january and to the middle of february were the highest points of recorded incidents. Overall the number of incidents seems to be declining, this isn't necessarily a good thing however. It data just shows the inicdents that were actually responded to by the police. A dataset of the amount of crimes during that time would be ideal to show if progress was actually made.
+
+**Part 7**
+
+```{r, echo=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+#LETS SEE number of incidents that resulted in subject injury and number of years of experience 
+yearsOnForce_ToIncidents<- data %>%
+  group_by(OFFICER_YEARS_ON_FORCE) %>%
+  filter(num_subject_injury == 1) %>%
+  summarize(total_incidents = n())
+
+
+yearsOnForce_corr <-cor(yearsOnForce_ToIncidents$OFFICER_YEARS_ON_FORCE,
+                        yearsOnForce_ToIncidents$total_incidents)
+
+```
+
+There correlation between the number of incidents that resulted in the subject being injured and the years of experience of an officer is `r yearsOnForce_corr`. This strong negative correlation combined with the disporportionate amount of less experienced officers responding to incidents can prove to be deadly. The dallas police force needs to hire more officers with 10 or more years of experience. 
+
+
+**Part 8**
+
+```{r, echo=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+#where did the most issues come in? where are officers more likely to be injured
+incident_data_OfficerInjury<- data %>%
+  filter(OFFICER_INJURY =="Yes" 
+           )
+# Create a leaflet map
+incidents_map <- leaflet() %>%
+  addTiles()
+
+# Add circle markers to the map
+incidents_map <- incidents_map %>%
+  addMarkers(data = incident_data_OfficerInjury, 
+                   lat = ~LOCATION_LATITUDE, 
+                   lng = ~LOCATION_LONGITUDE,
+                  
+                   popup = paste("Incident ID: ", data$REPORTING_AREA),
+             clusterOptions = markerClusterOptions())
+
+incidents_map
+```
+
+The map above illustrates that downtown dallas has the majority of incidents leading to an officer getting injured. Police officers responding to incidents in this area should take extra precaution when dealing with the incident. 
+
+**Part 9**
+
+```{r, echo=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+# Show the map of where mentally unstable  people were arrested 
+
+incident_data_filtered<- data %>%
+  filter(INCIDENT_REASON >= "Arrest" & 
+           SUBJECT_DESCRIPTION <= "Mentally unstable")
+
+leaflet(incident_data_filtered) %>%
+  addTiles() %>%
+  addMarkers(clusterOptions = markerClusterOptions(),
+             lng = ~LOCATION_LONGITUDE,  # specify column for longitude
+             lat = ~LOCATION_LATITUDE )
+
+```
+
+This interesting leaflet shows the areas where mentally unstable people were arrested. A closer inspection of the data reveals that these peole were likely to be near main roads and streets. This information suggests that this is were they are likely to be found. This can be used by the dallas police to take preventive measures by sweeping the roads and streets of mentally ill people and placing them in a hospital to get proper care, rather than wait for an incident to take place.
+
+# Conclusion
+In this report, we have identified several problem areas that need to be solved by the dallas police force. The data shows a pattern of lesser experienced officers (officers with less than 10 years of experience) tend to use excessive force on subjects , which is aggravated by the fact that these officers group are by a large margin the group who respond to the most incident cases. This means that subjects are more likely to be injured during an incident. Additionally we found that there is a decline in the number of female hires, which can lead to a diversity problem in the police workforce. 
+
+It is important to note that the analysis in this report is limited by incomplete data, which could impact the fact finding of this report. Despite the limitation, we are confident that action is needed to solve the aforementioned problem areas and improve the departments incident handling. 
+
+Overall, we implore the dallas police force to tackle this issues as soon as possible, because the lives of the people in their jurisdiction depend on their effective policing.[ref][2] 
+
+# References
+<style>
+body {
+text-align: justify}
+</style>
+Ref[1]: https://www.kaggle.com/datasets/center-for-policing-equity/data-science-for-good?datasetId=45286&sortBy=relevance&language=Python
+
+Ref[2]: https://www.kaggle.com/code/linfaner2/acs-racism-index-and-policy-department-information
